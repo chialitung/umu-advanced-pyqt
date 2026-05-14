@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt
+import os
+
+from PyQt6.QtCore import Qt, QUrl
+from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -26,6 +29,7 @@ from ..styles import (
     DANGER_600,
     SLATE_200,
     SLATE_500,
+    SLATE_700,
     SLATE_800,
     SUCCESS_500,
     WARNING_600,
@@ -423,16 +427,55 @@ class GovernanceResultWindow(QDialog):
                 "不合规原因": "; ".join(r.get("issues", [])),
             })
 
+        config = self._governance_service.config_service
+        last_dir = config.get_config("export_last_dir", "")
+        if not last_dir or not os.path.isdir(last_dir):
+            last_dir = os.path.join(os.path.expanduser("~"), "Desktop")
+
+        default_name = f"governance_{self._run_id[:8]}_{now_beijing().strftime('%Y%m%d_%H%M%S')}.xlsx"
+        default_path = os.path.join(last_dir, default_name)
+
         path, _ = QFileDialog.getSaveFileName(
             self,
             "导出治理结果",
-            f"governance_{self._run_id[:8]}_{now_beijing().strftime('%Y%m%d_%H%M%S')}.xlsx",
+            default_path,
             "Excel (*.xlsx)",
         )
         if path:
             df = pd.DataFrame(rows)
             df.to_excel(path, sheet_name="治理结果", index=False)
-            QMessageBox.information(self, "导出成功", f"结果已保存到:\n{path}")
+            config.set_config("export_last_dir", os.path.dirname(path), "上次Excel导出目录")
+
+            dialog = QDialog(self)
+            dialog.setWindowTitle("导出成功")
+            dialog.setMinimumWidth(420)
+            dialog.setWindowModality(Qt.WindowModality.ApplicationModal)
+
+            dlg_layout = QVBoxLayout(dialog)
+            dlg_layout.setContentsMargins(24, 24, 24, 24)
+            dlg_layout.setSpacing(20)
+
+            label = QLabel(f"结果已保存到:\n{path}")
+            label.setStyleSheet(f"color: {SLATE_700}; font-size: 14px;")
+            label.setWordWrap(True)
+            dlg_layout.addWidget(label)
+
+            btn_layout = QHBoxLayout()
+            btn_layout.addStretch()
+
+            return_btn = StyledButton("返回", StyledButton.SECONDARY)
+            return_btn.clicked.connect(dialog.reject)
+            btn_layout.addWidget(return_btn)
+
+            open_btn = StyledButton("打开文件", StyledButton.PRIMARY)
+            open_btn.clicked.connect(dialog.accept)
+            btn_layout.addWidget(open_btn)
+
+            dlg_layout.addLayout(btn_layout)
+
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                QDesktopServices.openUrl(QUrl.fromLocalFile(path))
+
 
     def _on_sort(self, section: int) -> None:
         if not hasattr(self, "_sort_column"):

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QHBoxLayout, QMainWindow, QStackedWidget, QWidget
+from PyQt6.QtWidgets import QHBoxLayout, QMainWindow, QMessageBox, QStackedWidget, QWidget
 
 from .components.sidebar import Sidebar
 from .components.toast import ToastManager
@@ -169,6 +169,16 @@ class MainWindow(QMainWindow):
         self._toast_manager.show(message, toast_type)
 
     def closeEvent(self, event) -> None:
-        """Clean up on close."""
-        self._auth_service.close_client()
-        event.accept()
+        """Confirm before closing."""
+        reply = QMessageBox.question(
+            self,
+            "确认退出",
+            "确定要退出程序吗？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            self._auth_service.close_client()
+            event.accept()
+        else:
+            event.ignore()
