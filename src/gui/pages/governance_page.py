@@ -291,6 +291,7 @@ class GovernancePage(QWidget):
         self._cancel_governance_btn.clicked.connect(self._on_cancel_governance)
         self._governance_service.progress_updated.connect(self._on_governance_progress)
         self._governance_service.governance_finished.connect(self._on_governance_finished)
+        self._sync_service.progress_updated.connect(self._on_sync_progress)
         self._sync_service.sync_finished.connect(self._on_sync_finished)
         self._history_search.textChanged.connect(self._filter_history)
         self._history_status.currentIndexChanged.connect(self._filter_history)
@@ -385,6 +386,10 @@ class GovernancePage(QWidget):
         self._pending_full_governance = True
         self._pending_dates = (start, end)
         self._set_governance_running(True)
+
+    def _on_sync_progress(self, sync_type: str, percent: int, message: str) -> None:
+        if getattr(self, '_pending_full_governance', False):
+            self._progress.set_value(percent, message)
 
     def _on_sync_finished(self, sync_type: str, success: bool, details: str) -> None:
         if not getattr(self, '_pending_full_governance', False):
