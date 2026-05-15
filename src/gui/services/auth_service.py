@@ -39,6 +39,7 @@ class AuthService(QObject):
     def __init__(self) -> None:
         super().__init__()
         self._username: str = ""
+        self._role_type: str = ""
         self._is_admin: bool = False
         self._serialized_session: str = ""
         self._client: LMSClient | None = None
@@ -61,18 +62,21 @@ class AuthService(QObject):
             logger.warning("Login failed: %s", exc)
             return False, "账号或密码错误"
 
-        # Check admin status
+        # Check admin status and role type
         lms_client = LMSClient(auth=auth)
         try:
             user_endpoint = UserEndpoint(lms_client)
             is_admin = user_endpoint.is_admin(username)
+            role_type = user_endpoint.get_role_type(username)
         except Exception as exc:
             logger.warning("Admin check failed: %s", exc)
             is_admin = False
+            role_type = ""
         finally:
             lms_client.close()
 
         self._username = username
+        self._role_type = role_type
         self._is_admin = is_admin
         self._serialized_session = serialize_session(auth.session)
 
@@ -82,6 +86,7 @@ class AuthService(QObject):
     def logout(self) -> None:
         """Clear authentication state."""
         self._username = ""
+        self._role_type = ""
         self._is_admin = False
         self._serialized_session = ""
         if self._client is not None:
@@ -94,6 +99,9 @@ class AuthService(QObject):
 
     def is_admin(self) -> bool:
         return self._is_admin
+
+    def get_role_type(self) -> str:
+        return self._role_type
 
     def get_username(self) -> str:
         return self._username

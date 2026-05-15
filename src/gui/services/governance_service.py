@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
 from PyQt6.QtCore import QObject, QThread, pyqtSignal
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, or_
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -175,7 +175,7 @@ class GovernanceWorker(QThread):
 
     def __init__(self, database_url: str, serialized_session: str, run_id: str,
                  start_date: str | None = None, end_date: str | None = None,
-                 resume: bool = False) -> None:
+                 resume: bool = False, owner: str = "") -> None:
         super().__init__()
         self.database_url = database_url
         self.serialized_session = serialized_session
@@ -183,6 +183,7 @@ class GovernanceWorker(QThread):
         self.start_date = start_date
         self.end_date = end_date
         self.resume = resume
+        self.owner = owner
         self._cancelled = False
 
     def cancel(self) -> None:
@@ -213,6 +214,7 @@ class GovernanceWorker(QThread):
                     status="running",
                     start_date=self.start_date,
                     end_date=self.end_date,
+                    owner=self.owner,
                 )
                 db_session.add(run_record)
                 db_session.commit()
@@ -747,8 +749,7 @@ class GovernanceWorker(QThread):
                 db_session.add(SessionModel(**record))
         db_session.commit()
 
-    @staticmethod
-    def _save_result(run_id: str, result: CourseGovernanceResult, db_session) -> None:
+    def _save_result(self, run_id: str, result: CourseGovernanceResult, db_session) -> None:
         gr = GovernanceResult(
             run_id=run_id,
             course_id=result.course_id,
@@ -761,6 +762,7 @@ class GovernanceWorker(QThread):
             overall_level=result.overall_level,
             rule_results=result.rule_results,
             issues=result.issues,
+            owner=self.owner,
         )
         db_session.add(gr)
         db_session.commit()
@@ -803,19 +805,19 @@ class GovernanceService(QObject):
             db_session.close()
 
     def start_governance(self, serialized_session: str, start_date: str | None = None,
-                         end_date: str | None = None) -> str:
+                         end_date: str | None = None, owner: str = "") -> str:
         if self._worker and self._worker.isRunning():
             return ""
         run_id = str(uuid.uuid4())
         self._worker = GovernanceWorker(
-            self.database_url, serialized_session, run_id, start_date, end_date
+            self.database_url, serialized_session, run_id, start_date, end_date, owner=owner
         )
         self._worker.progress_updated.connect(self.progress_updated)
         self._worker.governance_finished.connect(self.governance_finished)
         self._worker.start()
         return run_id
 
-    def resume_governance(self, run_id: str, serialized_session: str) -> bool:
+    def resume_governance(self, run_id: str, serialized_session: str, owner: str = "") -> bool:
         if self._worker and self._worker.isRunning():
             return False
         engine = create_engine(
@@ -835,7 +837,7 @@ class GovernanceService(QObject):
             db_session.close()
 
         self._worker = GovernanceWorker(
-            self.database_url, serialized_session, run_id, resume=True
+            self.database_url, serialized_session, run_id, resume=True, owner=owner
         )
         self._worker.progress_updated.connect(self.progress_updated)
         self._worker.governance_finished.connect(self.governance_finished)
@@ -849,7 +851,7 @@ class GovernanceService(QObject):
         if self._worker is not None and self._worker.isRunning():
             self._worker.cancel()
 
-    def preview_governance(self, start_date: str | None = None, end_date: str | None = None) -> dict:
+    def preview_governance(self, start_date: str | None = None, end_date: str | None = None, owner: str = "") -> dict:
         engine = create_engine(
             self.database_url,
             connect_args={"check_same_thread": False},
@@ -866,6 +868,16 @@ class GovernanceService(QObject):
                 .filter(Course.umu_id != excluded_umu_id)
                 .filter(Course.lesson_type != excluded_lesson_type)
             )
+            if owner:
+                query = query.filter(
+                    or_(Course.synced_by == owner, Course.synced_by.is_(None))
+                )
+
+            user_query = db_session.query(User)
+            if owner:
+                user_query = user_query.filter(
+                    or_(User.synced_by == owner, User.synced_by.is_(None))
+                )
 
             if start_date:
                 try:
@@ -881,8 +893,8 @@ class GovernanceService(QObject):
                     pass
 
             course_count = query.count()
-            user_count = db_session.query(User).count()
-            last_course = db_session.query(Course).order_by(Course.update_time.desc()).first()
+            user_count = user_query.count()
+            last_course = query.order_by(Course.update_time.desc()).first()
             last_sync = None
             if last_course and last_course.update_time:
                 last_sync = last_course.update_time.isoformat()
@@ -891,7 +903,7 @@ class GovernanceService(QObject):
         finally:
             db_session.close()
 
-    def get_runs(self) -> list[dict]:
+    def get_runs(self, owner: str = "") -> list[dict]:
         engine = create_engine(
             self.database_url,
             connect_args={"check_same_thread": False},
@@ -900,7 +912,12 @@ class GovernanceService(QObject):
         SessionLocal = sessionmaker(bind=engine)
         db_session = SessionLocal()
         try:
-            runs = db_session.query(GovernanceRun).order_by(GovernanceRun.started_at.desc()).all()
+            query = db_session.query(GovernanceRun).order_by(GovernanceRun.started_at.desc())
+            if owner:
+                query = query.filter(
+                    or_(GovernanceRun.owner == owner, GovernanceRun.owner.is_(None))
+                )
+            runs = query.all()
             result = []
             for r in runs:
                 compliant_rate = None
@@ -925,7 +942,7 @@ class GovernanceService(QObject):
         finally:
             db_session.close()
 
-    def get_results(self, run_id: str) -> dict:
+    def get_results(self, run_id: str, owner: str = "") -> dict:
         engine = create_engine(
             self.database_url,
             connect_args={"check_same_thread": False},
@@ -934,7 +951,12 @@ class GovernanceService(QObject):
         SessionLocal = sessionmaker(bind=engine)
         db_session = SessionLocal()
         try:
-            run = db_session.query(GovernanceRun).filter_by(run_id=run_id).first()
+            run_query = db_session.query(GovernanceRun).filter_by(run_id=run_id)
+            if owner:
+                run_query = run_query.filter(
+                    or_(GovernanceRun.owner == owner, GovernanceRun.owner.is_(None))
+                )
+            run = run_query.first()
             if not run:
                 return {"run": None, "results": [], "stats": {}}
 
@@ -974,7 +996,7 @@ class GovernanceService(QObject):
         finally:
             db_session.close()
 
-    def delete_run(self, run_id: str) -> bool:
+    def delete_run(self, run_id: str, owner: str = "") -> bool:
         engine = create_engine(
             self.database_url,
             connect_args={"check_same_thread": False},
@@ -983,7 +1005,12 @@ class GovernanceService(QObject):
         SessionLocal = sessionmaker(bind=engine)
         db_session = SessionLocal()
         try:
-            run = db_session.query(GovernanceRun).filter_by(run_id=run_id).first()
+            run_query = db_session.query(GovernanceRun).filter_by(run_id=run_id)
+            if owner:
+                run_query = run_query.filter(
+                    or_(GovernanceRun.owner == owner, GovernanceRun.owner.is_(None))
+                )
+            run = run_query.first()
             if not run:
                 return False
             db_session.query(GovernanceResult).filter_by(run_id=run_id).delete()
@@ -996,7 +1023,7 @@ class GovernanceService(QObject):
         finally:
             db_session.close()
 
-    def clear_all_runs(self) -> int:
+    def clear_all_runs(self, owner: str = "") -> int:
         engine = create_engine(
             self.database_url,
             connect_args={"check_same_thread": False},
@@ -1005,8 +1032,24 @@ class GovernanceService(QObject):
         SessionLocal = sessionmaker(bind=engine)
         db_session = SessionLocal()
         try:
-            db_session.query(GovernanceResult).delete()
-            count = db_session.query(GovernanceRun).delete()
+            if owner:
+                # Delete results for runs owned by this user
+                run_ids = [
+                    r.run_id for r in
+                    db_session.query(GovernanceRun).filter(
+                        or_(GovernanceRun.owner == owner, GovernanceRun.owner.is_(None))
+                    ).all()
+                ]
+                if run_ids:
+                    db_session.query(GovernanceResult).filter(
+                        GovernanceResult.run_id.in_(run_ids)
+                    ).delete(synchronize_session=False)
+                count = db_session.query(GovernanceRun).filter(
+                    or_(GovernanceRun.owner == owner, GovernanceRun.owner.is_(None))
+                ).delete(synchronize_session=False)
+            else:
+                db_session.query(GovernanceResult).delete()
+                count = db_session.query(GovernanceRun).delete()
             db_session.commit()
             return count
         except Exception:

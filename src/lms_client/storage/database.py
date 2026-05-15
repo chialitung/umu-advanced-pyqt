@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from sqlalchemy import Boolean, DateTime, Integer, String, Text, create_engine, inspect, text
+from sqlalchemy import Boolean, DateTime, Integer, String, Text, UniqueConstraint, create_engine, inspect, text
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -96,6 +96,66 @@ class DatabaseManager:
                 else:
                     # PostgreSQL and others — use Alembic for real migrations
                     logger.warning("Column migration not implemented for dialect: %s", dialect)
+
+    def migrate_constraints(self) -> None:
+        """Rebuild SQLite tables when unique constraints need updating."""
+        inspector = inspect(self.engine)
+        if self.engine.dialect.name != "sqlite":
+            return
+
+        # Check users table: umu_id was standalone unique, now composite (synced_by, umu_id)
+        if inspector.has_table("users"):
+            constraints = inspector.get_unique_constraints("users")
+            for c in constraints:
+                if "umu_id" in c.get("column_names", []) and len(c.get("column_names", [])) == 1:
+                    self._rebuild_table("users", TABLE_MODEL_MAP["users"])
+                    logger.info("Rebuilt users table for composite unique constraint")
+                    break
+
+        # Check courses table: course_id was standalone unique, now composite (synced_by, course_id)
+        if inspector.has_table("courses"):
+            constraints = inspector.get_unique_constraints("courses")
+            for c in constraints:
+                if "course_id" in c.get("column_names", []) and len(c.get("column_names", [])) == 1:
+                    self._rebuild_table("courses", TABLE_MODEL_MAP["courses"])
+                    logger.info("Rebuilt courses table for composite unique constraint")
+                    break
+
+    def _rebuild_table(self, table_name: str, model) -> None:
+        """Rebuild a SQLite table to apply schema changes (e.g. unique constraints)."""
+        from sqlalchemy import MetaData, Table
+
+        inspector = inspect(self.engine)
+        existing_cols = {c["name"] for c in inspector.get_columns(table_name)}
+
+        temp_name = f"{table_name}_new"
+        metadata = MetaData()
+        new_table = Table(temp_name, metadata)
+
+        for col in model.__table__.columns:
+            new_table.append_column(col.copy())
+
+        for constraint in model.__table__.constraints:
+            if isinstance(constraint, UniqueConstraint):
+                new_table.append_constraint(
+                    UniqueConstraint(
+                        *[c.name for c in constraint.columns],
+                        name=constraint.name,
+                    )
+                )
+
+        with self.engine.begin() as conn:
+            conn.execute(text("PRAGMA foreign_keys=OFF"))
+            new_table.create(self.engine)
+
+            common_cols = existing_cols & {c.name for c in model.__table__.columns}
+            col_str = ", ".join(common_cols)
+            conn.execute(text(f"INSERT INTO {temp_name} ({col_str}) SELECT {col_str} FROM {table_name}"))
+            conn.execute(text(f"DROP TABLE {table_name}"))
+            conn.execute(text(f"ALTER TABLE {temp_name} RENAME TO {table_name}"))
+            conn.execute(text("PRAGMA foreign_keys=ON"))
+
+        logger.info("Rebuilt table %s", table_name)
 
     def create_table_from_schema(self, table_name: str, schema: dict) -> None:
         """Dynamically create a table from a JSON schema descriptor."""

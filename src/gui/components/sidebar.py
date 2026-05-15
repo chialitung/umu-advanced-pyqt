@@ -125,6 +125,13 @@ class Sidebar(QWidget):
         }
         return mapping.get(page_id, "")
 
-    def set_user(self, username: str, is_admin: bool) -> None:
+    def set_user(self, username: str, is_admin: bool, role_type: str = "") -> None:
         self._user_name_label.setText(username)
-        self._admin_badge.setVisible(is_admin)
+        if role_type == "4":
+            self._admin_badge.setText("管理员")
+            self._admin_badge.setVisible(True)
+        elif role_type == "5":
+            self._admin_badge.setText("子管理员")
+            self._admin_badge.setVisible(True)
+        else:
+            self._admin_badge.setVisible(False)

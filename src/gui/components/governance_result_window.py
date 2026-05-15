@@ -25,6 +25,7 @@ from ..components.empty_state import EmptyState
 from ..components.stat_card import StatCard
 from ..components.styled_button import StyledButton
 from ..styles import (
+    BG_SURFACE,
     BRAND_500,
     DANGER_600,
     SLATE_200,
@@ -39,10 +40,11 @@ from ..styles import (
 class GovernanceResultWindow(QDialog):
     """Independent window displaying governance results for a single run."""
 
-    def __init__(self, governance_service, run_id: str, parent=None) -> None:
+    def __init__(self, governance_service, run_id: str, parent=None, owner: str = "") -> None:
         super().__init__(parent)
         self._governance_service = governance_service
         self._run_id = run_id
+        self._owner = owner
         self._all_results: list[dict] = []
         self._setup_window()
         self._setup_ui()
@@ -81,18 +83,49 @@ class GovernanceResultWindow(QDialog):
         info_layout.addStretch()
         layout.addLayout(info_layout)
 
-        # Stats row
-        stats_layout = QHBoxLayout()
-        stats_layout.setSpacing(12)
-        self._stat_total = StatCard("课程总数", "-")
-        self._stat_compliant = StatCard("合规", "-")
-        self._stat_major = StatCard("需治理", "-")
-        self._stat_minor = StatCard("次要问题", "-")
-        stats_layout.addWidget(self._stat_total)
-        stats_layout.addWidget(self._stat_compliant)
-        stats_layout.addWidget(self._stat_major)
-        stats_layout.addWidget(self._stat_minor)
-        layout.addLayout(stats_layout)
+        # Stats row — unified card
+        stats_container = QWidget()
+        stats_container.setObjectName("stats-panel")
+        stats_container.setStyleSheet(
+            f"""QWidget#stats-panel {{
+                background-color: {BG_SURFACE};
+                border: 1px solid {SLATE_200};
+                border-radius: 12px;
+            }}"""
+        )
+
+        stats_layout = QHBoxLayout(stats_container)
+        stats_layout.setContentsMargins(16, 24, 16, 24)
+        stats_layout.setSpacing(0)
+
+        self._stat_total = StatCard("课程总数", "-", compact=True)
+        self._stat_compliant = StatCard("合规", "-", compact=True)
+        self._stat_major = StatCard("需治理", "-", compact=True)
+        self._stat_minor = StatCard("次要问题", "-", compact=True)
+
+        stats_layout.addWidget(self._stat_total, 1, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        divider1 = QFrame()
+        divider1.setFrameShape(QFrame.Shape.VLine)
+        divider1.setStyleSheet(f"color: {SLATE_200};")
+        stats_layout.addWidget(divider1)
+
+        stats_layout.addWidget(self._stat_compliant, 1, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        divider2 = QFrame()
+        divider2.setFrameShape(QFrame.Shape.VLine)
+        divider2.setStyleSheet(f"color: {SLATE_200};")
+        stats_layout.addWidget(divider2)
+
+        stats_layout.addWidget(self._stat_major, 1, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        divider3 = QFrame()
+        divider3.setFrameShape(QFrame.Shape.VLine)
+        divider3.setStyleSheet(f"color: {SLATE_200};")
+        stats_layout.addWidget(divider3)
+
+        stats_layout.addWidget(self._stat_minor, 1, alignment=Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(stats_container)
 
         # Filter row
         filter_layout = QHBoxLayout()
@@ -151,7 +184,7 @@ class GovernanceResultWindow(QDialog):
         layout.addWidget(self._empty_state)
 
     def _load_results(self) -> None:
-        data = self._governance_service.get_results(self._run_id)
+        data = self._governance_service.get_results(self._run_id, owner=self._owner)
         run = data.get("run") or {}
         results = data.get("results", [])
         stats = data.get("stats", {})
@@ -409,7 +442,7 @@ class GovernanceResultWindow(QDialog):
         import pandas as pd
         from lms_client.timeutil import now_beijing
 
-        data = self._governance_service.get_results(self._run_id)
+        data = self._governance_service.get_results(self._run_id, owner=self._owner)
         results = data.get("results", [])
         if not results:
             QMessageBox.information(self, "导出", "没有可导出的结果")

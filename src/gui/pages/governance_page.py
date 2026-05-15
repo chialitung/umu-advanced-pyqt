@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtWidgets import (
     QComboBox,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -27,6 +28,7 @@ from ..components.stat_card import StatCard
 from ..components.step_indicator import StepIndicator
 from ..components.styled_button import StyledButton
 from ..styles import (
+    BG_SURFACE,
     BRAND_500,
     DANGER_50,
     DANGER_600,
@@ -46,15 +48,16 @@ class PreviewWorker(QThread):
     preview_finished = pyqtSignal(dict)
     preview_error = pyqtSignal(str)
 
-    def __init__(self, governance_service, start_date: str, end_date: str) -> None:
+    def __init__(self, governance_service, start_date: str, end_date: str, owner: str = "") -> None:
         super().__init__()
         self._governance_service = governance_service
         self._start_date = start_date
         self._end_date = end_date
+        self._owner = owner
 
     def run(self) -> None:
         try:
-            data = self._governance_service.preview_governance(self._start_date, self._end_date)
+            data = self._governance_service.preview_governance(self._start_date, self._end_date, self._owner)
             self.preview_finished.emit(data)
         except Exception as exc:
             self.preview_error.emit(str(exc))
@@ -147,6 +150,9 @@ class GovernancePage(QWidget):
         self._start_date.setFixedWidth(140)
         self._start_date.setDate(datetime(datetime.now().year, 1, 1))
         self._start_date.setDisplayFormat("yyyy-MM-dd")
+        cal = self._start_date.calendarWidget()
+        if cal:
+            cal.setMinimumSize(340, 280)
         date_layout.addWidget(QLabel("从:"))
         date_layout.addWidget(self._start_date)
 
@@ -155,6 +161,9 @@ class GovernancePage(QWidget):
         self._end_date.setFixedWidth(140)
         self._end_date.setDate(datetime.now())
         self._end_date.setDisplayFormat("yyyy-MM-dd")
+        cal2 = self._end_date.calendarWidget()
+        if cal2:
+            cal2.setMinimumSize(340, 280)
         date_layout.addWidget(QLabel("至:"))
         date_layout.addWidget(self._end_date)
 
@@ -165,16 +174,41 @@ class GovernancePage(QWidget):
         date_layout.addStretch()
         layout.addLayout(date_layout)
 
-        # Preview stats
-        stats_layout = QHBoxLayout()
-        stats_layout.setSpacing(12)
-        self._preview_course_count = StatCard("待审核课程", "-")
-        self._preview_user_count = StatCard("已同步用户", "-")
-        self._preview_last_sync = StatCard("数据更新时间", "-")
-        stats_layout.addWidget(self._preview_course_count)
-        stats_layout.addWidget(self._preview_user_count)
-        stats_layout.addWidget(self._preview_last_sync)
-        layout.addLayout(stats_layout)
+        # Preview stats — unified card
+        stats_container = QWidget()
+        stats_container.setObjectName("stats-panel")
+        stats_container.setStyleSheet(
+            f"""QWidget#stats-panel {{
+                background-color: {BG_SURFACE};
+                border: 1px solid {SLATE_200};
+                border-radius: 12px;
+            }}"""
+        )
+
+        stats_layout = QHBoxLayout(stats_container)
+        stats_layout.setContentsMargins(16, 24, 16, 24)
+        stats_layout.setSpacing(0)
+
+        self._preview_course_count = StatCard("待审核课程", "-", compact=True)
+        self._preview_user_count = StatCard("已同步用户", "-", compact=True)
+        self._preview_last_sync = StatCard("数据更新时间", "-", compact=True)
+
+        stats_layout.addWidget(self._preview_course_count, 1, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        divider1 = QFrame()
+        divider1.setFrameShape(QFrame.Shape.VLine)
+        divider1.setStyleSheet(f"color: {SLATE_200};")
+        stats_layout.addWidget(divider1)
+
+        stats_layout.addWidget(self._preview_user_count, 1, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        divider2 = QFrame()
+        divider2.setFrameShape(QFrame.Shape.VLine)
+        divider2.setStyleSheet(f"color: {SLATE_200};")
+        stats_layout.addWidget(divider2)
+
+        stats_layout.addWidget(self._preview_last_sync, 1, alignment=Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(stats_container)
 
         # Step indicator
         self._step_indicator = StepIndicator(["配置范围", "数据同步", "执行审核", "查看结果"])
@@ -344,7 +378,8 @@ class GovernancePage(QWidget):
         self._preview_user_count.set_value("-")
         self._preview_last_sync.set_value("加载中...")
 
-        self._preview_worker = PreviewWorker(self._governance_service, start, end)
+        owner = self._auth_service.get_username()
+        self._preview_worker = PreviewWorker(self._governance_service, start, end, owner)
         self._preview_worker.preview_finished.connect(self._on_preview_finished)
         self._preview_worker.preview_error.connect(self._on_preview_error)
         self._preview_worker.finished.connect(lambda: setattr(self, '_preview_worker', None))
@@ -382,7 +417,8 @@ class GovernancePage(QWidget):
         self._step_indicator.set_current(1)
         self._progress.reset()
         self._progress.set_value(0, "正在同步用户数据...")
-        self._sync_service.start_sync_users(serialized)
+        owner = self._auth_service.get_username()
+        self._sync_service.start_sync_users(serialized, owner=owner)
         self._pending_full_governance = True
         self._pending_dates = (start, end)
         self._set_governance_running(True)
@@ -402,13 +438,14 @@ class GovernancePage(QWidget):
         if not serialized:
             return
         start, end = self._pending_dates
+        owner = self._auth_service.get_username()
         if sync_type == "users":
             self._progress.set_value(0, "正在同步课程数据...")
-            self._sync_service.start_sync_courses(serialized, start, end)
+            self._sync_service.start_sync_courses(serialized, start, end, owner=owner)
         elif sync_type == "courses":
             self._step_indicator.set_current(2)
             self._progress.set_value(0, "准备开始审核...")
-            self._current_run_id = self._governance_service.start_governance(serialized, start, end)
+            self._current_run_id = self._governance_service.start_governance(serialized, start, end, owner=owner)
             self._pending_full_governance = False
 
     def _on_quick_governance(self) -> None:
@@ -419,7 +456,8 @@ class GovernancePage(QWidget):
         end = self._end_date.date().toString("yyyy-MM-dd")
         self._step_indicator.set_current(2)
         self._progress.reset()
-        self._current_run_id = self._governance_service.start_governance(serialized, start, end)
+        owner = self._auth_service.get_username()
+        self._current_run_id = self._governance_service.start_governance(serialized, start, end, owner=owner)
         self._set_governance_running(True)
 
     def _on_cancel_governance(self) -> None:
@@ -447,12 +485,14 @@ class GovernancePage(QWidget):
         self._step_indicator.set_current(3 if success else 2)
         if success:
             self._current_run_id = run_id
-            window = GovernanceResultWindow(self._governance_service, run_id, self)
+            owner = self._auth_service.get_username()
+            window = GovernanceResultWindow(self._governance_service, run_id, self, owner=owner)
             window.exec()
         self._load_history()
 
     def _load_history(self) -> None:
-        self._history_data = self._governance_service.get_runs()
+        owner = self._auth_service.get_username()
+        self._history_data = self._governance_service.get_runs(owner=owner)
         self._history_page = 0
         self._history_page_size = 10
         self._filter_history()
@@ -601,14 +641,16 @@ class GovernancePage(QWidget):
 
     def _view_run(self, run_id: str) -> None:
         self._current_run_id = run_id
-        window = GovernanceResultWindow(self._governance_service, run_id, self)
+        owner = self._auth_service.get_username()
+        window = GovernanceResultWindow(self._governance_service, run_id, self, owner=owner)
         window.exec()
 
     def _resume_run(self, run_id: str) -> None:
         serialized = self._auth_service.get_serialized_session()
         if not serialized:
             return
-        if self._governance_service.resume_governance(run_id, serialized):
+        owner = self._auth_service.get_username()
+        if self._governance_service.resume_governance(run_id, serialized, owner=owner):
             self._current_run_id = run_id
             self._step_indicator.set_current(2)
             self._progress.reset()
@@ -622,15 +664,17 @@ class GovernancePage(QWidget):
         msg.setDefaultButton(QMessageBox.StandardButton.No)
         reply = msg.exec()
         if reply == QMessageBox.StandardButton.Yes:
-            self._governance_service.delete_run(run_id)
+            owner = self._auth_service.get_username()
+            self._governance_service.delete_run(run_id, owner=owner)
             self._load_history()
 
     def _on_clear_history(self) -> None:
         reply = QMessageBox.question(
             self, "确认清空",
-            "确定要清空所有治理历史记录吗？此操作不可撤销。",
+            "确定要清空当前账号的治理历史记录吗？此操作不可撤销。",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
         if reply == QMessageBox.StandardButton.Yes:
-            self._governance_service.clear_all_runs()
+            owner = self._auth_service.get_username()
+            self._governance_service.clear_all_runs(owner=owner)
             self._load_history()

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import JSON, Boolean, Column, DateTime, Integer, LargeBinary, String, Text
+from sqlalchemy import JSON, Boolean, Column, DateTime, Integer, LargeBinary, String, Text, UniqueConstraint
 from sqlalchemy.orm import declarative_base
 
 from ..timeutil import now_beijing
@@ -35,13 +35,18 @@ class User(Base, SyncMixin):
     raw_data = Column(JSON)
 
     # UMU Advanced extended fields
-    umu_id = Column(String(64), index=True, unique=True)
+    umu_id = Column(String(64), index=True)
     number = Column(String(64))
     user_name = Column(String(255))
     account_joining_time = Column(DateTime)
     departments = Column(Text)
     role_type = Column(String(16))
     is_admin = Column(Boolean, default=False)
+    synced_by = Column(String(255), nullable=True, index=True)
+
+    __table_args__ = (
+        UniqueConstraint('synced_by', 'umu_id', name='uq_user_synced'),
+    )
 
 
 class Organization(Base, SyncMixin):
@@ -61,7 +66,7 @@ class Course(Base, SyncMixin):
 
     __tablename__ = "courses"
 
-    course_id = Column(String(64), index=True, unique=True)
+    course_id = Column(String(64), index=True)
     group_id = Column(String(64), index=True)
     name = Column(String(512))
     creator_id = Column(String(64))
@@ -85,6 +90,11 @@ class Course(Base, SyncMixin):
     categoryArr = Column(JSON)
     multimedia_id = Column(String(32), nullable=True)
     last_fetch_time = Column(DateTime)
+    synced_by = Column(String(255), nullable=True, index=True)
+
+    __table_args__ = (
+        UniqueConstraint('synced_by', 'course_id', name='uq_course_synced'),
+    )
 
 
 class Session(Base, SyncMixin):
@@ -133,6 +143,7 @@ class GovernanceResult(Base, SyncMixin):
     rule_results = Column(JSON)
     issues = Column(JSON)
     created_at = Column(DateTime, default=now_beijing)
+    owner = Column(String(255), nullable=True, index=True)
 
 
 class GovernanceRun(Base, SyncMixin):
@@ -149,6 +160,7 @@ class GovernanceRun(Base, SyncMixin):
     error_message = Column(Text)
     start_date = Column(String(10))
     end_date = Column(String(10))
+    owner = Column(String(255), nullable=True, index=True)
 
 
 class StudentTask(Base, SyncMixin):

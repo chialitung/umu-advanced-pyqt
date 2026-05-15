@@ -63,7 +63,7 @@ class UserEndpoint:
         return self.client.get("/uapi/v1/user/get-login-accounts")
 
     def is_admin(self, email: str | None = None) -> bool:
-        """Check whether the user is an administrator.
+        """Check whether the user is an administrator or sub-administrator.
 
         When *email* is omitted, the method attempts to derive it from
         ``/uapi/v1/user/account-plan`` (``enterprise_main_account``).
@@ -76,7 +76,8 @@ class UserEndpoint:
         Returns
         -------
         bool
-            ``True`` when the user's ``role_type`` equals ``"4"``.
+            ``True`` when the user's ``role_type`` equals ``"4"`` (admin)
+            or ``"5"`` (sub-admin).
         """
         if email is None:
             plan = self.get_account_plan()
@@ -101,7 +102,43 @@ class UserEndpoint:
             return False
 
         role_type = users[0].get("role_type")
-        return role_type == "4"
+        return role_type in ("4", "5")
+
+    def get_role_type(self, email: str | None = None) -> str:
+        """Return the user's raw ``role_type`` value from the UMU API.
+
+        Parameters
+        ----------
+        email:
+            User email to query.  If ``None``, auto-detect from account-plan.
+
+        Returns
+        -------
+        str
+            The raw ``role_type`` string (e.g. ``"4"``, ``"5"``, ``"1"``).
+            Returns empty string when the user cannot be found.
+        """
+        if email is None:
+            plan = self.get_account_plan()
+            if isinstance(plan, dict):
+                data = plan.get("data", {})
+                email = data.get("enterprise_main_account") if isinstance(data, dict) else None
+            if not email:
+                return ""
+
+        result = self.client.get(
+            "/ajax/enterprise/getUserList",
+            params={"keywords": email, "page": 1, "size": 20},
+        )
+        if not isinstance(result, dict):
+            return ""
+
+        data = result.get("data", {})
+        users = data.get("list", []) if isinstance(data, dict) else []
+        if not users:
+            return ""
+
+        return str(users[0].get("role_type", ""))
 
     def get_user_list(
         self,

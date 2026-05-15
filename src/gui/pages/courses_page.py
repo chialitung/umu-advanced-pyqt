@@ -128,7 +128,8 @@ class CoursesPage(QWidget):
         self._start_btn.setText("取消同步")
         self._start_btn.setVariant("danger")
         self._empty_state.setVisible(False)
-        self._sync_service.start_sync_courses(serialized, start_date, end_date)
+        owner = self._auth_service.get_username()
+        self._sync_service.start_sync_courses(serialized, start_date, end_date, owner=owner)
 
     def _on_progress(self, sync_type: str, percent: int, message: str) -> None:
         if sync_type == "courses":

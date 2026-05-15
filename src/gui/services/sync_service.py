@@ -31,13 +31,15 @@ class SyncWorker(QThread):
     sync_finished = pyqtSignal(bool, str)  # success, details
 
     def __init__(self, database_url: str, serialized_session: str, sync_type: str,
-                 start_date: str | None = None, end_date: str | None = None) -> None:
+                 start_date: str | None = None, end_date: str | None = None,
+                 owner: str = "") -> None:
         super().__init__()
         self.database_url = database_url
         self.serialized_session = serialized_session
         self.sync_type = sync_type
         self.start_date = start_date
         self.end_date = end_date
+        self.owner = owner
         self._cancelled = False
 
     def cancel(self) -> None:
@@ -249,15 +251,15 @@ class SyncWorker(QThread):
             "group_times": group_times if isinstance(group_times, list) else None,
         }
 
-    @staticmethod
-    def _upsert_users(records: list[dict], SessionLocal: sessionmaker) -> None:
+    def _upsert_users(self, records: list[dict], SessionLocal: sessionmaker) -> None:
         session = SessionLocal()
         try:
             for record in records:
                 umu_id = record.get("umu_id")
                 if not umu_id:
                     continue
-                existing = session.query(User).filter_by(umu_id=umu_id).first()
+                record["synced_by"] = self.owner
+                existing = session.query(User).filter_by(umu_id=umu_id, synced_by=self.owner).first()
                 if existing:
                     for key, value in record.items():
                         if key != "raw_data":
@@ -272,15 +274,17 @@ class SyncWorker(QThread):
         finally:
             session.close()
 
-    @staticmethod
-    def _upsert_courses(records: list[dict], SessionLocal: sessionmaker) -> tuple[list[str], int]:
+    def _upsert_courses(self, records: list[dict], SessionLocal: sessionmaker) -> tuple[list[str], int]:
         session = SessionLocal()
         session_sync_ids = []
         try:
             course_ids = [r.get("course_id") for r in records if r.get("course_id")]
             existing_courses = {
                 c.course_id: c
-                for c in session.query(Course).filter(Course.course_id.in_(course_ids)).all()
+                for c in session.query(Course)
+                .filter(Course.course_id.in_(course_ids))
+                .filter(Course.synced_by == self.owner)
+                .all()
             }
             inserted = 0
             updated = 0
@@ -291,6 +295,8 @@ class SyncWorker(QThread):
                 if not course_id:
                     skipped += 1
                     continue
+
+                record["synced_by"] = self.owner
 
                 group_times = record.pop("group_times", None)
                 if group_times:
@@ -468,10 +474,10 @@ class SyncService(QObject):
         self._user_worker: SyncWorker | None = None
         self._course_worker: SyncWorker | None = None
 
-    def start_sync_users(self, serialized_session: str) -> None:
+    def start_sync_users(self, serialized_session: str, owner: str = "") -> None:
         if self._user_worker and self._user_worker.isRunning():
             return
-        self._user_worker = SyncWorker(self.database_url, serialized_session, "users")
+        self._user_worker = SyncWorker(self.database_url, serialized_session, "users", owner=owner)
         self._user_worker.progress_updated.connect(
             lambda p, m: self.progress_updated.emit("users", p, m)
         )
@@ -481,11 +487,11 @@ class SyncService(QObject):
         self._user_worker.start()
 
     def start_sync_courses(self, serialized_session: str, start_date: str | None = None,
-                           end_date: str | None = None) -> None:
+                           end_date: str | None = None, owner: str = "") -> None:
         if self._course_worker and self._course_worker.isRunning():
             return
         self._course_worker = SyncWorker(
-            self.database_url, serialized_session, "courses", start_date, end_date
+            self.database_url, serialized_session, "courses", start_date, end_date, owner=owner
         )
         self._course_worker.progress_updated.connect(
             lambda p, m: self.progress_updated.emit("courses", p, m)

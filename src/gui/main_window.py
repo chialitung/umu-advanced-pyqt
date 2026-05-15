@@ -12,6 +12,8 @@ from .pages.courses_page import CoursesPage
 from .pages.governance_page import GovernancePage
 from .pages.login_page import LoginPage
 from .pages.users_page import UsersPage
+from lms_client.storage.database import DatabaseManager
+
 from .services.auth_service import AuthService
 from .services.config_service import ConfigService
 from .services.governance_service import GovernanceService
@@ -33,6 +35,12 @@ class MainWindow(QMainWindow):
         self._sync_service = SyncService()
         self._governance_service = GovernanceService()
         self._config_service = ConfigService()
+
+        # Database migration
+        db_mgr = DatabaseManager()
+        db_mgr.create_tables()
+        db_mgr.migrate_columns()
+        db_mgr.migrate_constraints()
 
         # Toast manager
         self._toast_manager = ToastManager(self)
@@ -124,7 +132,8 @@ class MainWindow(QMainWindow):
         self._sidebar.setVisible(True)
         self._sidebar.set_user(
             self._auth_service.get_username(),
-            self._auth_service.is_admin()
+            self._auth_service.is_admin(),
+            self._auth_service.get_role_type(),
         )
         self._stack.setCurrentIndex(1)
         self._switch_page("governance")

@@ -451,6 +451,7 @@ QWidget#stat-card {{
     border: 1px solid {SLATE_200};
     border-radius: 12px;
     padding: 16px;
+    min-height: 100px;
 }}
 
 QWidget#stat-card QLabel#stat-value {{
@@ -744,6 +745,11 @@ QFileDialog {{
     background-color: {BG_SURFACE};
 }}
 
+QCalendarWidget {{
+    min-width: 340px;
+    min-height: 280px;
+}}
+
 QCalendarWidget QWidget {{
     background-color: {BG_SURFACE};
     color: {SLATE_800};
@@ -754,7 +760,10 @@ QCalendarWidget QToolButton {{
     color: {SLATE_700};
     border: none;
     border-radius: 6px;
-    padding: 4px 8px;
+    padding: 6px 10px;
+    font-size: 13px;
+    min-width: 28px;
+    min-height: 28px;
 }}
 
 QCalendarWidget QToolButton:hover {{
@@ -769,7 +778,47 @@ QCalendarWidget QSpinBox {{
     background-color: {BG_SURFACE};
     border: 1px solid {SLATE_200};
     border-radius: 4px;
-    padding: 2px;
+    padding: 2px 24px 2px 4px;
+}}
+
+QCalendarWidget QSpinBox::up-button,
+QCalendarWidget QSpinBox::down-button {{
+    background-color: transparent;
+    border: none;
+    width: 20px;
+    subcontrol-origin: border;
+}}
+
+QCalendarWidget QSpinBox::up-button {{
+    subcontrol-position: top right;
+}}
+
+QCalendarWidget QSpinBox::down-button {{
+    subcontrol-position: bottom right;
+}}
+
+QCalendarWidget QSpinBox::up-button:hover,
+QCalendarWidget QSpinBox::down-button:hover {{
+    background-color: {SLATE_100};
+    border-radius: 3px;
+}}
+
+QCalendarWidget QSpinBox::up-arrow {{
+    image: none;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-bottom: 5px solid {SLATE_500};
+    width: 0px;
+    height: 0px;
+}}
+
+QCalendarWidget QSpinBox::down-arrow {{
+    image: none;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-top: 5px solid {SLATE_500};
+    width: 0px;
+    height: 0px;
 }}
 
 QCalendarWidget QAbstractItemView:enabled {{
