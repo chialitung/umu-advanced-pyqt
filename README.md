@@ -2,6 +2,15 @@
 
 本项目是一套针对 UMU 学习管理系统（`www.umu.cn`）的 Python SDK，通过 HAR 文件逆向工程方式解析其 HTTP API 协议，封装为可直接调用的 Python API。同时提供 PyQt6 构建的桌面图形界面和命令行工具（CLI），兼顾开发者集成和终端用户直接使用两种场景。
 
+## 项目截图
+
+### 
+![截图1](screenshot/截图1.png)
+### 
+![截图2](screenshot/截图2.png)
+### 
+![截图3](screenshot/截图3.png)
+
 ---
 
 ## 一、技术栈概览
